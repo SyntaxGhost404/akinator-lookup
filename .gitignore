@@ -1,0 +1,10 @@
+/node_modules/
+/dist/
+/.sites-runtime/
+/.wrangler/
+/coverage/
+.env*
+!.env.example
+*.pem
+*.log
+.DS_Store
