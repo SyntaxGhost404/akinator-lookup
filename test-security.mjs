@@ -103,7 +103,12 @@ globalThis.fetch = async (value, options) => {
 try {
   resetDirectory();
   const root = await app.fetch(new Request(origin), env);
-  assert.equal(await root.text(), html);
+  assert.equal(await root.text(), html.replaceAll('__ASSET_VERSION__', 'dev'));
+  const versioned = new Map(); versioned.version = '0a1b2c3d4e5f';
+  assert.match(await (await createApp(versioned).fetch(new Request(origin), env)).text(), /\/app\.js\?v=0a1b2c3d4e5f"/);
+  const hostile = new Map(); hostile.version = '"><script>alert(1)</script>';
+  const hostilePage = await (await createApp(hostile).fetch(new Request(origin), env)).text();
+  assert.ok(!hostilePage.includes('<script>alert') && hostilePage.includes('/app.js?v=dev"'), 'Only a hex build version reaches the page');
   const csp = root.headers.get('Content-Security-Policy');
   assert.match(csp, /script-src 'self' 'nonce-[^']+'/);
   assert.ok(!csp.includes('unsafe-inline') && !csp.includes('unsafe-eval'));
@@ -113,7 +118,7 @@ try {
   const placeholder = await app.fetch(new Request(origin+'/api/placeholder?v=15'), env);
   assert.equal(placeholder.headers.get('Content-Type'), 'image/webp');
   assert.deepEqual(Buffer.from(await placeholder.arrayBuffer()), bytes);
-  for (const path of ['/api/nope','/.env','/.git/config','/_next/image?url=https://evil.test','/lib/lookup.mjs','/worker.mjs']) {
+  for (const path of ['/api/nope','/.env','/.git/config','/_next/image?url=https://evil.test','/lib/lookup.mjs','/worker.mjs','/ui/store.mjs','/views/results.mjs','/lookup-ui.mjs','/public/app.js']) {
     assert.equal((await app.fetch(new Request(origin+path),env)).status, 404);
   }
   assert.equal((await app.fetch(post('instances', {}), env)).status, 405);
@@ -168,10 +173,9 @@ try {
   assert.ok(calls.every(url=>!/(?:choose|finish|award|check-object|answer)/.test(url.pathname)));
 } finally {globalThis.fetch=realFetch; resetDirectory();}
 
-// Golden digests retain the verified page/CSS baseline without requiring the
-// private Sites repository's history in a fresh GitHub clone or source archive.
-// Asset revisions are normalized; the removed unused CSS rules are excluded.
+// Golden digests pin the reviewed page shell and stylesheet, so any change to
+// either is deliberate and re-reviewed. Update them together with the design.
 const presentationHash = text => createHash('sha256').update(text.replace(/\?v=\d+/g, '?v=baseline')).digest('hex');
-assert.equal(presentationHash(html), '8d8846df15292df44aa3e4563ae33a016208a0c5f6c03f2fec9b25f475ebb86a');
-assert.equal(presentationHash(await fs.readFile('public/style.css','utf8')), '91f24d46627e34857bf2329b40efd9c13f5b793f4bd8dd3aa865a4f72aed1ab8');
-console.log('Full HTTP flow, exact assets, hidden source paths, method guards, expiry recovery, safe diagnostics, and unchanged page/style baseline passed.');
+assert.equal(presentationHash(html), '379066583f9d75a6355fcad52e438bac3cfc9fa3046074ca01dabe54c8ad49ca');
+assert.equal(presentationHash(await fs.readFile('public/style.css','utf8')), 'faa32f597bfb0ee44e2435e4e1f0ffd69dda33d24f11f1f442c08708b4ae9abb');
+console.log('Full HTTP flow, exact assets, hidden source paths, method guards, expiry recovery, safe diagnostics, and pinned page/style digests passed.');

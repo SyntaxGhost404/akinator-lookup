@@ -8,7 +8,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "dev": "node scripts/dev.mjs",
-    "test": "node test-autocomplete.mjs && node test-lookup.mjs && node test-security.mjs",
+    "test": "node test-autocomplete.mjs && node test-lookup.mjs && node test-security.mjs && node test-design.mjs",
     "test:mobile": "node --experimental-vm-modules test-mobile-flow.mjs"
   },
   "dependencies": {},
