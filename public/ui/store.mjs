@@ -26,6 +26,9 @@ export class LookupStore {
     this.results = signal(emptyResults());
     this.suggestions = signal(closedSuggestions());
     this.selected = signal(null);
+    // The selected category's popular entries, browsable while no search shows.
+    this.popular = signal(null);
+    this.popularToken = 0;
     this.generation = 0;
     this.suggestionGeneration = 0;
     this.connectionGeneration = 0;
@@ -42,6 +45,15 @@ export class LookupStore {
   languages() { return [...new Set(this.instances().map(instance => instance.language))].sort(); }
   selectedInstances() { return pick(this.instances(), this.language(), this.category()); }
   visibleEntries() { return visible(this.results().entries, this.filter()); }
+  popularEntries() {
+    const popular = this.popular();
+    return popular && popular.key === this.category() ? popular.entries : [];
+  }
+  // What the details view steps through: filtered search results, or the
+  // popular browse list while no search is showing.
+  navigable() {
+    return this.results().status === 'idle' ? this.popularEntries() : this.visibleEntries();
+  }
   counts() {
     const entries = this.results().entries;
     return Object.fromEntries(['all', 'pictureless', 'supplied', 'unknown'].map(filter =>
@@ -54,8 +66,31 @@ export class LookupStore {
 
   // Untracked equivalents for actions.
   currentInstances() { return pick(this.instances.peek(), this.language.peek(), this.category.peek()); }
+  currentNavigable() {
+    const results = this.results.peek();
+    if (results.status !== 'idle') return visible(results.entries, this.filter.peek());
+    const popular = this.popular.peek();
+    return popular && popular.key === this.category.peek() ? popular.entries : [];
+  }
   warmSelected() {
     for (const instance of this.currentInstances()) this.client.warm(instance.key, instance.autocomplete);
+  }
+  // Popular entries come with session preparation. Single categories only;
+  // a newer request or a reconnect drops an older one.
+  async loadPopular() {
+    const token = ++this.popularToken;
+    const targets = this.currentInstances();
+    if (this.category.peek() === 'all' || targets.length !== 1) return;
+    const [instance] = targets;
+    const show = () => {
+      const entries = this.client.popularFor(instance.key);
+      if (token !== this.popularToken || !entries?.length) return false;
+      this.popular.set({key: instance.key, entries});
+      return true;
+    };
+    if (show()) return;
+    try { await this.client.warm(instance.key, instance.autocomplete); } catch { return; }
+    show();
   }
 
   setLanguage(code) {
@@ -67,6 +102,7 @@ export class LookupStore {
       this.invalidate({clearResults: true});
     });
     this.warmSelected();
+    this.loadPopular();
   }
   setCategory(key) {
     if (key === this.category.peek()) return;
@@ -76,6 +112,7 @@ export class LookupStore {
       this.invalidate({clearResults: true});
     });
     this.warmSelected();
+    this.loadPopular();
   }
   setFilter(value) { this.filter.set(value); }
   rememberCategory() {
@@ -113,6 +150,9 @@ export class LookupStore {
     this.invalidate();
     this.connection.set({status: 'connecting', error: null});
     this.client.reset();
+    // A reconnect clears the client's caches, so the popular list reloads too.
+    this.popularToken++;
+    this.popular.set(null);
     try {
       const data = await this.client.directory();
       if (!Array.isArray(data.instances)) throw Error('Directory unavailable');
@@ -126,6 +166,7 @@ export class LookupStore {
         this.connection.set({status: 'ready', error: null});
       });
       this.warmSelected();
+      this.loadPopular();
     } catch (error) {
       if (generation !== this.connectionGeneration) return;
       batch(() => {
@@ -232,7 +273,9 @@ export class LookupStore {
       this.category.set(item.instance.key);
       this.rememberCategory();
     });
-    return this.search();
+    const searched = this.search();
+    this.loadPopular();
+    return searched;
   }
 
   async search() {
@@ -288,7 +331,7 @@ export class LookupStore {
 
   select(entry) { this.selected.set(entry); }
   step(delta) {
-    const list = visible(this.results.peek().entries, this.filter.peek());
+    const list = this.currentNavigable();
     if (!list.length) return null;
     const index = list.indexOf(this.selected.peek());
     const next = list[index < 0 ? 0 : Math.max(0, Math.min(list.length - 1, index + delta))];

@@ -89,7 +89,10 @@ globalThis.fetch = async (value, options) => {
   assert.ok(['lb.elokence.com', 'srv14.akinator.com'].includes(url.hostname));
   if (url.pathname.endsWith('instances_v3.php')) return new Response(xml);
   if (url.pathname.endsWith('/game/sessions')) return Response.json({result:{sessionId:'engine-' + ++counter}});
-  if (url.pathname.endsWith('/set-and-get-toplist')) return Response.json({result:{objects:[]}});
+  if (url.pathname.endsWith('/set-and-get-toplist')) return Response.json({result:{objects:[
+    {baseId:7, name:'Top <b>entry</b>', description:'Most played', absolutePicturePath:'https://photos.clarinea.fr/top.jpg', ranking:3, nbPlayed:120},
+    {baseId:8, name:'Hostile image', absolutePicturePath:'https://evil.test/track.png', ranking:9},
+  ]}});
   if (mode === 'expired' && queryFailures++ === 0) return Response.json({type:'TIMEOUT SESSION'}, {status:422});
   if (mode === 'busy') return Response.json({message:'Busy'}, {status:429,headers:{'Retry-After':'2'}});
   if (mode === 'secret-error') return Response.json({type:'INCORRECT PARAMETER', message:url.pathname}, {status:400});
@@ -130,7 +133,13 @@ try {
   const directory = await app.fetch(new Request(origin+'/api/instances'), env);
   assert.equal((await directory.json()).instances.length, 4);
   const prepared = await app.fetch(post('prepare', {instance:input.instance}), env);
-  const ready = (await prepared.json()).session;
+  const preparedData = await prepared.json();
+  const ready = preparedData.session;
+  // Preparation returns the toplist as normalized popular entries. Text stays
+  // literal and only allowlisted image hosts become avatar URLs.
+  assert.deepEqual(preparedData.popular.map(entry => [entry.name, entry.ranking, entry.times_played]), [['Top <b>entry</b>', 3, 120], ['Hostile image', 9, null]]);
+  assert.equal(preparedData.popular[0].avatar_url, 'https://photos.clarinea.fr/top.jpg');
+  assert.equal(preparedData.popular[1].avatar_url, null, 'A non-allowlisted image host never reaches the page');
   assert.ok(ready.proof); assert.equal(ready.step, 2);
   const result = await app.fetch(post('search', {...input, session:ready}), env);
   const data = await result.json();
@@ -177,5 +186,5 @@ try {
 // either is deliberate and re-reviewed. Update them together with the design.
 const presentationHash = text => createHash('sha256').update(text.replace(/\?v=\d+/g, '?v=baseline')).digest('hex');
 assert.equal(presentationHash(html), '379066583f9d75a6355fcad52e438bac3cfc9fa3046074ca01dabe54c8ad49ca');
-assert.equal(presentationHash(await fs.readFile('public/style.css','utf8')), 'faa32f597bfb0ee44e2435e4e1f0ffd69dda33d24f11f1f442c08708b4ae9abb');
+assert.equal(presentationHash(await fs.readFile('public/style.css','utf8')), 'c785e8d6a3a7d371cbce2f78d2f9447e7f5f7591a465f13ae954e3fc49240f67');
 console.log('Full HTTP flow, exact assets, hidden source paths, method guards, expiry recovery, safe diagnostics, and pinned page/style digests passed.');

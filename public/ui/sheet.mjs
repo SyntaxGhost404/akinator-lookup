@@ -52,6 +52,7 @@ export class Sheet {
     const opening = this.state.peek() !== 'open';
     if (opening) {
       this.stopMotion();
+      this.clearGesture?.();
       this.returnFocus = this.returnFocus || document.activeElement;
       this.app.inert = true;
       this.layer.hidden = false;
@@ -232,10 +233,14 @@ export class Sheet {
     panel.addEventListener('pointermove', move, {passive: false});
     panel.addEventListener('pointerup', end);
     panel.addEventListener('pointercancel', end);
-    // A drag that ends over a button must not also press it.
+    // A drag that ends over a button must not also press it. Only the click
+    // finishing that same drag is swallowed: a new gesture or a fresh open
+    // clears the guard, so a later tap or key press always lands.
+    panel.addEventListener('pointerdown', () => { suppressClick = 0; }, true);
     panel.addEventListener('click', event => {
       if (suppressClick && event.timeStamp - suppressClick < 400) { event.stopPropagation(); event.preventDefault(); }
       suppressClick = 0;
     }, true);
+    this.clearGesture = () => { suppressClick = 0; drag = null; };
   }
 }

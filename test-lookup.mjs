@@ -30,6 +30,17 @@ const warmed=await prepare({instance:i.key},fake);
 assert.equal(warmed.session.step,2);
 assert.equal(calls.length,3);
 assert.ok(calls.at(-1).url.endsWith('/set-and-get-toplist'));
+// Preparation surfaces the category's toplist as browsable popular entries.
+assert.ok(Array.isArray(warmed.popular)&&warmed.popular.length===1);
+assert.equal(warmed.popular[0].name,'Test');assert.equal(warmed.popular[0].ranking,null);
+const originalImageTop='https://photos.clarinea.fr/BL_15_en/600/partenaire/original.jpg';
+const rankingFake=async(url,fields)=>{if(url.includes('instances_v3'))return xml;if(url.endsWith('/game/sessions'))return JSON.stringify({result:{sessionId:'t'}});if(url.includes('set-and-get-toplist'))return JSON.stringify({result:{objects:[{baseId:'9',name:'Popular One',description:'d',absolutePicturePath:originalImageTop,ranking:1,nbPlayed:4210,awardId:7},{baseId:'10',name:'Popular Two',description:'',absolutePicturePath:'',ranking:2,nbPlayed:0}]}});return JSON.stringify({result:{objects:[]}});};
+const popularPrep=await prepare({instance:i.key},rankingFake);
+assert.equal(popularPrep.popular.length,2);
+assert.deepEqual(popularPrep.popular.map(e=>[e.name,e.ranking,e.times_played]),[['Popular One',1,4210],['Popular Two',2,0]]);
+assert.equal(popularPrep.popular[0].raw.awardId,7,'Every returned field stays inspectable');
+assert.equal(popularPrep.popular[0].avatar_status,'supplied');assert.equal(popularPrep.popular[0].avatar_url,originalImageTop);
+assert.equal(popularPrep.popular[1].avatar_status,'missing');
 await lookup({instance:i.key,q:'Test',session:warmed.session},false,fake);
 assert.equal(calls.filter(call=>call.url.endsWith('/game/sessions')).length,1);
 assert.equal(calls.filter(call=>call.url.endsWith('/set-and-get-toplist')).length,1);
@@ -51,14 +62,14 @@ console.log('Explicit defaults, empty fields, absent metadata and custom URLs re
 // Exercise the actual HTTP error parser, bootstrap, retry, and returned step.
 const originalFetch=globalThis.fetch;
 const recoveryCalls=[];
-let errorType='TIMEOUT SESSION',failEveryQuery=false;
+let errorType='TIMEOUT SESSION',failEveryQuery=false,errorStatus=422,errorBody=null;
 globalThis.fetch=async(url,options={})=>{
   const u=new URL(url),fields=options.body?Object.fromEntries(options.body.entries()):Object.fromEntries(u.searchParams);
   recoveryCalls.push({path:u.pathname,fields});
   if(u.pathname.endsWith('instances_v3.php'))return new Response(xml);
   if(u.pathname.endsWith('/game/sessions'))return Response.json({result:{sessionId:'renewed'}});
   if(u.pathname.endsWith('/set-and-get-toplist'))return Response.json({result:{objects:[]}});
-  if(u.pathname.includes('/expired/')||failEveryQuery)return Response.json({type:errorType},{status:422});
+  if(u.pathname.includes('/expired/')||failEveryQuery)return Response.json(errorBody??{type:errorType},{status:errorStatus});
   return Response.json({result:{objects:u.pathname.endsWith('/suggest-objects')?['Polly (Description)']:[{name:'Polly',absolutePicturePath:officialDefault}]}});
 };
 const expired={id:'expired',instance:i.key,base:i.base_url,step:17};
@@ -69,16 +80,32 @@ try {
     assert.equal(recovered.session.id,'renewed');assert.equal(recovered.session.step,3);
     assert.equal(recoveryCalls.filter(c=>c.path.endsWith('/game/sessions')).length,1);
     assert.equal(recoveryCalls.filter(c=>c.path.endsWith('/set-and-get-toplist')).length,1);
+    // The official client sends its versionName and versionCode on session creation.
+    assert.equal(recoveryCalls.find(c=>c.path.endsWith('/game/sessions')).fields.client_version,'9.1.22 (406)');
     assert.equal(recoveryCalls.at(-1).fields.step,'2');assert.equal(recoveryCalls.at(-1).fields.name,'Polly');
     const next=await lookup({instance:i.key,q:'Polly',session:recovered.session},suggest);
     assert.equal(next.session.step,4);
     assert.equal(recoveryCalls.at(-1).fields.step,'3');
   }
+  // A 422 whose body carries no deliberate error type is treated as an expired
+  // session and recovered once, matching the official client's broad 422 handling.
+  for(const body of [{detail:'session expired'},{type:''},{}]){
+    resetDirectory();recoveryCalls.length=0;errorBody=body;
+    const recovered=await lookup({instance:i.key,q:'Polly',session:expired},false);
+    assert.equal(recovered.session.id,'renewed','Untyped 422 must renew the session');
+    assert.equal(recoveryCalls.filter(c=>c.path.endsWith('/game/sessions')).length,1);
+  }
+  errorBody=null;
   recoveryCalls.length=0;failEveryQuery=true;
   await assert.rejects(()=>lookup({instance:i.key,q:'Polly',session:expired}),error=>error instanceof AkinatorServiceError&&error.serviceType==='TIMEOUT SESSION');
   assert.equal(recoveryCalls.filter(c=>c.path.endsWith('/game/sessions')).length,1,'Recovery must stop after one renewal');
   recoveryCalls.length=0;errorType='INCORRECT PARAMETER';
   await assert.rejects(()=>lookup({instance:i.key,q:'Polly',session:expired}),/INCORRECT PARAMETER/);
-  assert.equal(recoveryCalls.filter(c=>c.path.endsWith('/game/sessions')).length,0,'Validation errors must not trigger renewal');
+  assert.equal(recoveryCalls.filter(c=>c.path.endsWith('/game/sessions')).length,0,'Explicit non-timeout 422 must not trigger renewal');
+  // A non-422 service error is surfaced immediately without a session renewal.
+  recoveryCalls.length=0;errorStatus=400;errorType='TECHNICAL ERROR';
+  await assert.rejects(()=>lookup({instance:i.key,q:'Polly',session:expired}),/TECHNICAL ERROR/);
+  assert.equal(recoveryCalls.filter(c=>c.path.endsWith('/game/sessions')).length,0,'Non-422 errors must not trigger renewal');
+  errorStatus=422;errorType='TIMEOUT SESSION';
 } finally {globalThis.fetch=originalFetch;resetDirectory();}
-console.log('Real HTTP 422 session expiry recovers search and autocomplete once, preserves steps, and leaves other errors intact.');
+console.log('HTTP 422 session expiry (typed and untyped) recovers once, preserves steps, sends client_version, and leaves explicit and non-422 errors intact.');

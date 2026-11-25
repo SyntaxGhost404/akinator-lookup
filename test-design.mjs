@@ -186,6 +186,11 @@ for (const [error, message] of [
   [Error('The lookup is busy. Try again shortly.'), 'The service is busy. Try again in a moment.'],
   [Error('Invalid session. Try again to reconnect.'), 'The session expired. Try again.'],
   [Error('Akinator suggest-objects rejected the request (HTTP 422): bad'), 'Akinator rejected the request. Try again or reconnect.'],
+  [Error('Akinator search rejected the request (HTTP 403): Forbidden'), 'Akinator is temporarily blocking requests. Wait a moment, then try again.'],
+  [Error('Akinator set-and-get-searchlist rejected the request (HTTP 500): KO - ENGINE REFUSAL'), 'Akinator’s engine declined this lookup. Try another name or reconnect.'],
+  [Error('Akinator search rejected the request (HTTP 500): KO - TECHNICAL ERROR'), 'Akinator had a technical problem. Try again.'],
+  [Error('Akinator search rejected the request (HTTP 503): KO - SERVER DOWN'), 'Akinator’s engine is temporarily down. Try again shortly.'],
+  [Error('Akinator game/sessions rejected the request (HTTP 400): KO - BAD MEDIA ID OR FOOTPRINT'), 'This lookup can’t reach the database. Reconnect to refresh.'],
   [Error('Something unexpected'), 'The lookup couldn’t finish. Try again or reconnect.'],
 ]) {
   assert.deepEqual(describeError(error), {message, detail: error.message});

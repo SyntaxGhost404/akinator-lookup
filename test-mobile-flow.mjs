@@ -63,7 +63,12 @@ const pause = (action, instance, q) => {
   paused.set('/api/' + action + '|' + instance + '|' + q, new Promise(resolve => release = resolve));
   return release;
 };
-let nextSession = 0, rejectNext = false, rejectInstance = '';
+let nextSession = 0, rejectNext = false, rejectInstance = '', popularEnabled = false;
+const popularFor = instance => [1, 2, 3].map(rank => ({id: 'p' + rank, name: 'Popular ' + rank, description: 'Popular entry ' + rank,
+  category: 'Characters', language: instance.slice(0, 2), instance_key: instance,
+  avatar_status: rank === 2 ? 'placeholder' : 'supplied', avatar_url: rank === 2 ? null : 'https://photos.clarinea.fr/BL_15_en/600/partenaire/p' + rank + '.jpg',
+  default_avatar_url: rank === 2 ? 'https://photos.clarinea.fr/BL_1_fr/none.jpg' : null,
+  raw: {name: 'Popular ' + rank, ranking: rank * 10, nbPlayed: 1000 - rank, awardId: rank}, ranking: rank * 10, times_played: 1000 - rank}));
 const directory = ['1', '2', '13', '14'].map((subject_id, index) => ({key: 'en' + index, language: 'en', subject_id, label: subject_id, autocomplete: true}));
 for (const language of ['ar', 'cn', 'de', 'es', 'fa', 'fr', 'id', 'il', 'it', 'jp', 'kr', 'nl', 'pl', 'pt', 'ru', 'tr', 'vi']) {
   directory.push({key: language + '0', language, subject_id: '1', label: 'Characters', autocomplete: true});
@@ -87,7 +92,7 @@ w.fetch = async function(url, options) {
   assert.equal(session.step, sessions.get(session.id), 'Overlapping requests desynchronized the engine step');
   session = {...session, step: session.step + 1};
   sessions.set(session.id, session.step);
-  if (url.endsWith('prepare')) return {ok: true, json: async () => ({session})};
+  if (url.endsWith('prepare')) return {ok: true, json: async () => ({session, popular: popularEnabled ? popularFor(input.instance) : []})};
   if (url.endsWith('suggest')) return {ok: true, json: async () => ({suggestions: input.q.startsWith('Pol') ? [polly] : input.q.startsWith('Nar') ? ['Nara (Test character)'] : [moin], session})};
   const name = input.q;
   const entries = [
@@ -397,6 +402,10 @@ pointer(grabber, 'pointermove', {clientX: 181, clientY: 330});
 pointer(grabber, 'pointermove', {clientX: 182, clientY: 560});
 pointer(grabber, 'pointerup', {clientX: 182, clientY: 560});
 assert.equal(sheetOpen(), false, 'Swipe down closes the sheet');
+// A tap right after reopening must land, not be swallowed by the finished drag.
+click('#settings-button'); row('Language').click();
+assert.equal($('sheet-title').textContent, 'Language', 'A tap after a drag dismissal must land');
+click('#sheet-close');
 console.log('Error recovery, reconnect and swipe to dismiss passed.');
 
 // Wide layouts keep details beside the results and move an open sheet there.
@@ -425,6 +434,42 @@ assert.equal(document.querySelectorAll('.card-body img,.card-body script').lengt
 click('#clear');
 assert.equal($('query').value, '');
 assert.equal($('results').querySelectorAll('.card').length, 0);
+
+// A single category's popular entries make the idle screen browsable.
+popularEnabled = true;
+click('#settings-button'); row('Language').click(); option('de').click(); click('#sheet-close');
+const popularSection = () => document.querySelector('.popular');
+const popularCards = () => [...popularSection().querySelectorAll('.card')];
+await waitFor(() => popularSection() && !popularSection().hidden, 'popular browse');
+assert.equal(popularCards().length, 3);
+assert.equal(popularSection().querySelector('.results-title').textContent, 'Popular in Characters');
+assert.equal(popularSection().querySelector('.count').textContent, '3 entries');
+assert.equal(popularCards()[0].querySelector('[data-kind="rank"]').textContent, '#10');
+assert.equal(popularCards()[1].querySelector('.avatar').dataset.imageState, 'pictureless');
+assert.equal($('empty').children.length, 0, 'The idle prompt gives way to popular entries');
+const firstPopular = popularCards()[0];
+firstPopular.querySelector('.card-open').click();
+assert.equal($('sheet-title').textContent, 'Popular 1');
+const facts = Object.fromEntries([...document.querySelectorAll('.facts > div')].map(row => [row.querySelector('dt').textContent, row.querySelector('dd').textContent]));
+assert.equal(facts['Popularity rank'], '#10');
+assert.equal(facts['Times played'], '999');
+assert.equal($('sheet-footer').querySelector('.position').textContent, '1 of 3', 'Details step through the popular list');
+$('sheet-footer').querySelector('[aria-label="Next match"]').click();
+assert.equal($('sheet-title').textContent, 'Popular 2');
+click('#sheet-close');
+type('Speed'); click('#search');
+await waitFor(() => document.querySelector('#results .card h3')?.textContent === 'Speed', 'search replaces popular');
+assert.equal(popularSection().hidden, true, 'Search results replace the popular list');
+assert.equal(document.querySelector('#results [data-kind="rank"]'), null, 'Search entries carry no popularity rank');
+click('#clear');
+assert.equal(popularSection().hidden, false, 'Clearing the search brings popular entries back');
+assert.equal(popularCards()[0], firstPopular, 'Popular cards are kept, so images stay decoded');
+chip('categories', 'all').click();
+assert.equal(popularSection().hidden, true, 'All categories shows the search prompt instead');
+assert.equal($('empty').querySelector('.empty-title').textContent, 'Find an entry');
+chip('categories', 'de0').click();
+assert.equal(popularSection().hidden, false);
+console.log('Popular browse: per-category list, rank badges, details facts and navigation, search handover and category scope passed.');
 await tick(0);
 const detached = [...observedNodes()].filter(node => !node.isConnected);
 assert.equal(detached.length, 0, 'Detached cards and pickers must leave the resize observer: ' + detached.map(node => node.className).join(', '));

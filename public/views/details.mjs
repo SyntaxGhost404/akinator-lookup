@@ -79,7 +79,9 @@ export function createDetails({store, sheet, layout, haptics, toasts}) {
         fact('Image', label.badge, label.detail),
         fact('Category', entryCategory(entry, instances)),
         fact('Language', [languageName(entry.language), h('span', {class: 'code', text: String(entry.language || '').toUpperCase()})]),
-        fact('ID', entry.id || 'Not returned')),
+        fact('ID', entry.id || 'Not returned'),
+        entry.ranking != null ? fact('Popularity rank', '#' + entry.ranking.toLocaleString('en')) : null,
+        entry.times_played != null ? fact('Times played', entry.times_played.toLocaleString('en')) : null),
       h('div', {class: 'details-actions'},
         h('button', {type: 'button', class: 'action sq', onclick: () => copy(entry.name || '', 'Name copied')}, icon('copy'), 'Copy name'),
         h('button', {type: 'button', class: 'action sq', onclick: () => copy(JSON.stringify(entry.raw, null, 2), 'Fields copied')}, icon('data'), 'Copy fields'),
@@ -88,7 +90,7 @@ export function createDetails({store, sheet, layout, haptics, toasts}) {
   }
 
   const position = () => {
-    const list = store.visibleEntries(), index = list.indexOf(store.selected());
+    const list = store.navigable(), index = list.indexOf(store.selected());
     return {index, total: list.length};
   };
   const step = delta => {
@@ -124,7 +126,7 @@ export function createDetails({store, sheet, layout, haptics, toasts}) {
       const entry = store.selected();
       if (!entry) { node.replaceChildren(); shown = null; onEmpty?.(); return; }
       if (entry === shown) return;
-      const list = store.results.peek().entries;
+      const list = store.currentNavigable();
       const direction = shown ? Math.sign(list.indexOf(entry) - list.indexOf(shown)) : 0;
       shown = entry;
       onTitle?.(entry.name || 'Unnamed entry');
@@ -141,7 +143,7 @@ export function createDetails({store, sheet, layout, haptics, toasts}) {
       title: store.selected.peek()?.name || 'Unnamed entry',
       view: 'details',
       render: () => [host({onTitle: title => { sheet.title.textContent = title; }, onEmpty: () => queueMicrotask(() => sheet.close())})],
-      footer: () => store.visibleEntries().length > 1 ? navigation({footer: true}) : [],
+      footer: () => store.currentNavigable().length > 1 ? navigation({footer: true}) : [],
     });
   }
 

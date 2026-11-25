@@ -32,6 +32,7 @@ export class LookupClient {
   constructor(send=(...args)=>globalThis.fetch(...args)) {
     this.send=send; this.sessions=new Map(); this.queues=new Map();
     this.warming=new Map(); this.cache=new Map(); this.cacheBytes=0; this.epoch=0;
+    this.popular=new Map();
   }
   async transport(url, options = {}) {
     const controller = new AbortController();
@@ -46,7 +47,7 @@ export class LookupClient {
   directory() { return this.transport('/api/instances', {cache: 'no-store'}); }
   reset() {
     this.epoch++; this.sessions.clear(); this.queues.clear(); this.warming.clear();
-    this.cache.clear(); this.cacheBytes=0;
+    this.cache.clear(); this.cacheBytes=0; this.popular.clear();
   }
   cacheKey(action,instance,q) { return action+'\0'+instance+'\0'+q.trim().toLowerCase(); }
   forget(key) {
@@ -77,7 +78,8 @@ export class LookupClient {
     // query uses the usual bootstrap path rather than waiting an extra round trip.
     const pending=Promise.resolve().then(async()=>{
       if(epoch!==this.epoch||this.sessions.has(key)||this.queues.has(key))return;
-      const {session}=await this.transport('/api/prepare',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({instance})});
+      const {session,popular}=await this.transport('/api/prepare',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({instance})});
+      if(epoch===this.epoch&&Array.isArray(popular)&&popular.length)this.rememberPopular(instance,popular);
       if(session&&epoch===this.epoch&&!this.sessions.has(key)&&!this.queues.has(key))this.sessions.set(key,session);
     }).catch(()=>null).finally(()=>{
       if(this.warming.get(key)===pending)this.warming.delete(key);
@@ -88,6 +90,13 @@ export class LookupClient {
   warm(instance, autocomplete=true) {
     return Promise.all([this.prepare(instance,'search'),...(autocomplete?[this.prepare(instance,'suggest')]:[])]);
   }
+  // Each category's popular entries arrive with preparation. Tab memory only,
+  // at most 24 categories, cleared on reconnect.
+  rememberPopular(instance,list) {
+    this.popular.delete(instance);this.popular.set(instance,list);
+    while(this.popular.size>24)this.popular.delete(this.popular.keys().next().value);
+  }
+  popularFor(instance) { return this.popular.get(instance); }
   request(action,instance,q,isCurrent=()=>true) {
     if(!isCurrent())return Promise.resolve(null);
     const cached=this.readCache(action,instance,q);

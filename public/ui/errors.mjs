@@ -8,6 +8,13 @@ const rules = [
   [error => /busy/i.test(error?.message), 'The service is busy. Try again in a moment.'],
   [error => /timed out/i.test(error?.message), 'The request timed out. Try again.'],
   [error => /invalid session|outdated session/i.test(error?.message), 'The session expired. Try again.'],
+  // The hosting edge blocks automated traffic with 403; back off and retry.
+  [error => /\b403\b|forbidden|cloudflare/i.test(error?.message), 'Akinator is temporarily blocking requests. Wait a moment, then try again.'],
+  // Named engine conditions, surfaced from the service response.
+  [error => /server down/i.test(error?.message), 'Akinator’s engine is temporarily down. Try again shortly.'],
+  [error => /engine refusal/i.test(error?.message), 'Akinator’s engine declined this lookup. Try another name or reconnect.'],
+  [error => /technical error/i.test(error?.message), 'Akinator had a technical problem. Try again.'],
+  [error => /bad media id or footprint/i.test(error?.message), 'This lookup can’t reach the database. Reconnect to refresh.'],
   [error => /rejected the request/i.test(error?.message), 'Akinator rejected the request. Try again or reconnect.'],
   [error => /same-origin/i.test(error?.message), 'This page can’t reach the service. Reload the page.'],
   [error => /select an available category/i.test(error?.message), 'This category is no longer available. Reconnect to refresh the list.'],

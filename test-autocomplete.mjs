@@ -98,3 +98,28 @@ await early.request('search','en','later');
 assert.equal(earlyCalls.at(-1).session.id,'interactive','Late preparation must not replace the active query session');
 assert.equal(earlyCalls.at(-1).session.step,3);
 console.log('Slow background preparation never delays early input or replaces its session.');
+
+// Popular entries arrive with preparation, are bounded, and clear on reconnect.
+const popularClient=new LookupClient(async(url,options)=>{
+ const body=JSON.parse(options.body);
+ return response({session:{id:'p-'+body.instance,step:2},popular:body.instance==='none'?[]:[{name:'Top '+body.instance}]});
+});
+await popularClient.prepare('en','search');
+assert.deepEqual(popularClient.popularFor('en'),[{name:'Top en'}]);
+await popularClient.prepare('none','search');
+assert.equal(popularClient.popularFor('none'),undefined,'An empty list is not cached');
+for(let index=0;index<30;index++)await popularClient.prepare('c'+index,'search');
+assert.equal(popularClient.popular.size,24,'At most 24 categories stay in memory');
+assert.equal(popularClient.popularFor('c0'),undefined,'The oldest category is dropped first');
+assert.deepEqual(popularClient.popularFor('c29'),[{name:'Top c29'}]);
+let finishPopular;
+const latePopular=new LookupClient(async(url,options)=>{
+ await new Promise(resolve=>finishPopular=resolve);
+ return response({session:{id:'late',step:2},popular:[{name:'Stale'}]});
+});
+const pendingPopular=latePopular.prepare('en','search');await tick();
+latePopular.reset();finishPopular();await pendingPopular;
+assert.equal(latePopular.popularFor('en'),undefined,'A reconnect drops popular lists that arrive late');
+popularClient.reset();
+assert.equal(popularClient.popular.size,0);
+console.log('Popular entries: cached from preparation, bounded to 24 categories, and cleared or rejected across reconnects.');

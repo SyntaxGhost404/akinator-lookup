@@ -25,6 +25,7 @@ export function renderCard(entry, index, {showCategory, instances, onOpen}) {
       h('h3', {class: 'card-title'}, open),
       h('p', {class: 'card-desc', dir: 'auto', text: entry.description || 'No description.'}),
       h('div', {class: 'card-meta'}, imageBadge(kind),
+        entry.ranking != null ? h('span', {class: 'badge sq', 'data-kind': 'rank', 'aria-label': 'Popularity rank ' + entry.ranking, text: '#' + entry.ranking.toLocaleString('en')}) : null,
         showCategory ? h('span', {class: 'badge sq', 'data-kind': 'category', text: entryCategory(entry, instances)}) : null)),
     icon('chevron-right', 'icon card-chevron'));
 }

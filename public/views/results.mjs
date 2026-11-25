@@ -1,7 +1,7 @@
 import {effect, onCleanup} from '../ui/reactive.mjs';
 import {byId, h, icon, listen} from '../ui/dom.mjs';
 import {chipGroup} from '../ui/controls.mjs';
-import {FILTER_OPTIONS, matchesFilter} from '../ui/catalog.mjs';
+import {categoryName, FILTER_OPTIONS, matchesFilter} from '../ui/catalog.mjs';
 import {describeError} from '../ui/errors.mjs';
 import {renderCard, skeletonCard} from './entry.mjs';
 
@@ -130,11 +130,43 @@ export function mountResults({store, details, panels, haptics, layout}) {
     }
   });
 
+  // While no search is showing, a single category's popular entries make the
+  // idle screen browsable. Cards are kept per list, so images stay decoded.
+  const popularTitle = h('h2', {class: 'results-title', id: 'popular-title'});
+  const popularCount = h('span', {class: 'count'});
+  const popularList = h('div', {class: 'results'});
+  const popularSection = h('section', {class: 'popular', 'aria-labelledby': 'popular-title', hidden: true},
+    h('div', {class: 'results-head'}, popularTitle, popularCount), popularList);
+  empty.before(popularSection);
+  let popularCards = new Map(), popularShown = null;
+  effect(() => {
+    const entries = store.results().status === 'idle' ? store.popularEntries() : [];
+    popularSection.hidden = !entries.length;
+    if (!entries.length || entries === popularShown) return;
+    popularShown = entries;
+    const instances = store.instances.peek();
+    const instance = instances.find(item => item.key === store.category.peek());
+    popularTitle.textContent = 'Popular in ' + (instance ? categoryName(instance) : 'this category');
+    popularCount.textContent = entries.length + (entries.length === 1 ? ' entry' : ' entries');
+    popularCards = new Map(entries.map((entry, index) => [entry, renderCard(entry, index, {showCategory: false, instances, onOpen: open})]));
+    popularList.replaceChildren(...popularCards.values());
+  });
+  effect(() => {
+    const selected = store.selected(), wide = layout() === 'wide';
+    store.popularEntries();
+    for (const [entry, card] of popularCards) {
+      const current = wide && entry === selected;
+      card.classList.toggle('is-selected', current);
+      if (current) card.querySelector('.card-open').setAttribute('aria-current', 'true');
+      else card.querySelector('.card-open').removeAttribute('aria-current');
+    }
+  });
+
   effect(() => {
     const results = store.results(), visible = store.visibleEntries().length;
     let nodes = [];
     if (results.status === 'idle') {
-      nodes = emptyState('search', 'Find an entry', 'Type at least two characters.',
+      if (!store.popularEntries().length) nodes = emptyState('search', 'Find an entry', 'Type at least two characters.',
         [h('button', {type: 'button', class: 'text-button sq', onclick: () => panels.openAbout()}, icon('info'), 'How it works')]);
     } else if (results.status === 'done' && !results.entries.length && results.scopes.some(scope => scope.status === 'done')) {
       nodes = emptyState('search', 'No matches', 'Try a shorter name or another spelling.');
